@@ -3,29 +3,41 @@ import numpy as np
 import time
 import psutil
 
-vid_info = ffmpeg.probe("input.mp4")['streams'][1]
-frames = int(vid_info['nb_frames'])
 
-process1 = (
-    ffmpeg
-    .input("input.mp4")
-    .output('pipe:', format='rawvideo', pix_fmt='bgr24')
-)
-print(process1.compile())
+def test_ffmpeg(input_video):
+    probe = ffmpeg.probe(input_video)
+    video_stream = next((stream for stream in probe['streams'] if stream['codec_type'] == 'video'), None)
 
-process1 = process1.run_async(pipe_stdout=True)
+    if video_stream is None:
+        print("No video stream found in the input file.")
+        return
 
-start = time.perf_counter()
-while True:
-    in_bytes = process1.stdout.read(2160 * 3840 * 3)
-    if not in_bytes:
-        break
-    frame = np.frombuffer(in_bytes, np.uint8).reshape([3840, 2160, 3])
-end = time.perf_counter()
+    width = int(video_stream['width'])
+    height = int(video_stream['height'])
 
-memory_usage = psutil.Process().memory_info().rss / (1024 ** 2)
+    process1 = (
+        ffmpeg.input(input_video).output('pipe:', format='rawvideo', pix_fmt='bgr24')
+    )
+    process1.compile()
 
-print(f"{frames / (end - start):.1f} frames per second")
-print(f"Memory usage: {memory_usage:.2f} MB")
+    process1 = process1.run_async(pipe_stdout=True)
 
-process1.wait()
+    start = time.perf_counter()
+    while True:
+        in_bytes = process1.stdout.read(width * height * 3)
+        if not in_bytes:
+            break
+        frame = np.frombuffer(in_bytes, np.uint8).reshape([height, width, 3])
+    end = time.perf_counter()
+
+    memory_usage = psutil.Process().memory_info().rss / (1024 ** 2)
+
+    fps = int(video_stream['nb_frames']) / (end - start)
+    return fps, memory_usage
+
+
+if __name__ == '__main__':
+    for i in range(5):
+        fps, mem = test_ffmpeg(f"input{i}.mp4")
+        print(f"FPS: {fps:.1f}")
+        print(f"Memory usage: {mem:.2f} MB")
